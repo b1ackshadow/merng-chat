@@ -1,17 +1,80 @@
 const bcrypt = require("bcryptjs");
 const { Op } = require("sequelize");
-const { UserInputError } = require("apollo-server");
+const { UserInputError, AuthenticationError } = require("apollo-server");
+const jwt = require("jsonwebtoken");
 
 const { User } = require("../models");
+const { JWT_SECRET } = require("../config/env.json");
 
 module.exports = {
   Query: {
-    getUsers: async () => {
+    getUsers: async (_, __, context) => {
+      let token, user;
       try {
-        const users = await User.findAll();
+        if (context.req && context.req.headers.authorization) {
+          token = context.req.headers.authorization.split("Bearer ")[1];
+
+          jwt.verify(token, JWT_SECRET, (err, decodedToken) => {
+            if (err) {
+              throw new AuthenticationError("Unauthenticated");
+            }
+            user = decodedToken;
+            console.log(user);
+          });
+        }
+        const users = await User.findAll({
+          where: { username: { [Op.ne]: user.username } },
+        });
         return users;
       } catch (err) {
-        console.log(users);
+        console.log(err);
+        throw err;
+      }
+    },
+    login: async (_, { username, password }) => {
+      // Check and compare against database record
+      let errors = {};
+      try {
+        if (username.trim() === "")
+          errors.username = "username must not be empty";
+        if (password.trim() === "")
+          errors.password = "password must not be empty";
+
+        if (Object.keys(errors).length > 0)
+          throw new UserInputError("Bad input", { errors });
+
+        const user = await User.findOne({ where: { username } });
+        if (!user) {
+          errors.username = "User not found";
+          throw new UserInputError("user not found", { errors });
+        }
+
+        //check if password matches
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
+          errors.password = "Password is incorrect";
+          throw new AuthenticationError("password is incorrect", { errors });
+        }
+        // this means user is valid we need to issue a token
+        const token = jwt.sign(
+          {
+            username,
+          },
+          JWT_SECRET,
+          {
+            expiresIn: "1h",
+          }
+        );
+        //here if we return "user" directly then sequelize will convert
+        // to json otherwise we manually call toJSON to conver
+        return {
+          ...user.toJSON(),
+          createdAt: user.createdAt.toISOString(),
+          token,
+        };
+      } catch (error) {
+        console.log(error);
+        throw error;
       }
     },
   },
