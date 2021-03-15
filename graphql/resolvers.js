@@ -53,7 +53,7 @@ module.exports = {
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
           errors.password = "Password is incorrect";
-          throw new AuthenticationError("password is incorrect", { errors });
+          throw new UserInputError("password is incorrect", { errors });
         }
         // this means user is valid we need to issue a token
         const token = jwt.sign(
